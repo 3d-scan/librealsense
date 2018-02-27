@@ -1,0 +1,1 @@
+/usr/bin/cc  -pthread   -fPIC -pedantic -g -D_BSD_SOURCE   -mstrict-align -ftree-vectorize  -rdynamic CMakeFiles/rs-depth.dir/rs-depth.c.o  -o rs-depth -Wl,-rpath,/home/nvidia/cuda/librealsense: ../../../librealsense2.so.2.10.0 -lGL -lGLU -lm -lglfw -lusb-1.0 

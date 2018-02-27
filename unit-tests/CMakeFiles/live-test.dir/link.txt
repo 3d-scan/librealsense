@@ -1,0 +1,1 @@
+/usr/bin/c++   -std=c++11 -pthread -fPIC -pedantic -g -Wno-missing-field-initializers -Wno-switch -Wno-multichar -Wsequence-point -Wformat-security -mstrict-align -ftree-vectorize -std=c++11  -rdynamic CMakeFiles/live-test.dir/unit-tests-live.cpp.o CMakeFiles/live-test.dir/unit-tests-main.cpp.o  -o live-test -Wl,-rpath,/home/nvidia/cuda/librealsense: ../librealsense2.so.2.10.0 

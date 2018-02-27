@@ -230,6 +230,8 @@ namespace librealsense
     // It is expected that all branching outside of the loop control variable will be removed due to constant-folding.
     template<rs2_format FORMAT> void unpack_yuy2(byte * const d [], const byte * s, int n)
     {
+        // record time
+        auto now = std::chrono::high_resolution_clock::now();
         assert(n % 16 == 0); // All currently supported color resolutions are multiples of 16 pixels. Could easily extend support to other resolutions by copying final n<16 pixels into a zero-padded buffer and recursively calling self for final iteration.
 #ifdef RGB_AVX2
         auto src = reinterpret_cast<const __m256i *>(s);
@@ -737,6 +739,14 @@ for (int i = 0; i < n / 16; i++)
             }
         }
 #endif
+
+        // record time
+        auto now2 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now2 - now).count();
+        
+        // cuda test (should get 0)
+        auto res = calc();
+        LOG_ERROR("RESULT:" << res);
     }
 
     // This templated function unpacks UYVY into RGB8/RGBA8/BGR8/BGRA8, depending on the compile-time parameter FORMAT.
