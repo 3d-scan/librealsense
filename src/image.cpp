@@ -6,7 +6,9 @@
 #include "image.h"
 //#include "../include/librealsense2/rsutil.h" // For projection/deprojection logic
 
-#ifdef __SSSE3__
+#ifdef RS2_USE_CUDA
+#include "cuda/cuda-conversion.cuh"
+#elif __SSSE3__
 #include <tmmintrin.h> // For SSE3 intrinsic used in unpack_yuy2_sse
 #endif
 
@@ -232,11 +234,13 @@ namespace librealsense
     {
         // record time
         auto now = std::chrono::high_resolution_clock::now();
+
         assert(n % 16 == 0); // All currently supported color resolutions are multiples of 16 pixels. Could easily extend support to other resolutions by copying final n<16 pixels into a zero-padded buffer and recursively calling self for final iteration.
-#ifdef RGB_AVX2
+#ifdef RS2_USE_CUDA
+        rsimpl::unpack_yuy2_cuda<FORMAT>(d, s, n);
+#elif RGB_AVX2
         auto src = reinterpret_cast<const __m256i *>(s);
         auto dst = reinterpret_cast<__m256i *>(d[0]);
-
         #pragma omp parallel for
         for (int i = 0; i < n / 32; i++)
         {
@@ -343,6 +347,7 @@ namespace librealsense
 
                 if (FORMAT == RS2_FORMAT_RGB8)
                 {
+                
                     __m128i rgba0 = _mm256_extracti128_si256(XYZW1, 0);
                     __m128i rgba1 = _mm256_extracti128_si256(XYZW1, 1);
                     __m128i rgba2 = _mm256_extracti128_si256(UVST1, 0);
@@ -382,6 +387,7 @@ namespace librealsense
                     _mm256_storeu_si256(&dst[i * 3], a1_2);
                     _mm256_storeu_si256(&dst[i * 3 + 1], a3_4);
                     _mm256_storeu_si256(&dst[i * 3 + 2], a5_6);
+                    
                 }
             }
 
@@ -743,10 +749,8 @@ for (int i = 0; i < n / 16; i++)
         // record time
         auto now2 = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now2 - now).count();
-        
-        // cuda test (should get 0)
-        auto res = calc();
-        LOG_ERROR("RESULT:" << res);
+       
+        LOG_ERROR("ELAPSED:" << elapsed/* << std::string(elapsed/2500, "#")*/);
     }
 
     // This templated function unpacks UYVY into RGB8/RGBA8/BGR8/BGRA8, depending on the compile-time parameter FORMAT.
@@ -1007,17 +1011,30 @@ for (int i = 0; i < n / 16; i++)
     struct y8i_pixel { uint8_t l, r; };
     void unpack_y8_y8_from_y8i(byte * const dest[], const byte * source, int count)
     {
+        auto now = std::chrono::high_resolution_clock::now();
+#ifdef RS2_USE_CUDA
+        rsimpl::split_frame_y8_y8_from_y8i_cuda(dest, count, reinterpret_cast<const y8i_pixel *>(source));
+#else
         split_frame(dest, count, reinterpret_cast<const y8i_pixel *>(source),
             [](const y8i_pixel & p) -> uint8_t { return p.l; },
             [](const y8i_pixel & p) -> uint8_t { return p.r; });
+#endif
+        // record time
+        auto now2 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now2 - now).count();
+        LOG_ERROR(elapsed/* << std::string(elapsed/2500, "#")*/);
     }
 
     struct y12i_pixel { uint8_t rl : 8, rh : 4, ll : 4, lh : 8; int l() const { return lh << 4 | ll; } int r() const { return rh << 8 | rl; } };
     void unpack_y16_y16_from_y12i_10(byte * const dest[], const byte * source, int count)
     {
-        split_frame(dest, count, reinterpret_cast<const y12i_pixel *>(source),
-            [](const y12i_pixel & p) -> uint16_t { return p.l() << 6 | p.l() >> 4; },  // We want to convert 10-bit data to 16-bit data
-            [](const y12i_pixel & p) -> uint16_t { return p.r() << 6 | p.r() >> 4; }); // Multiply by 64 1/16 to efficiently approximate 65535/1023
+#ifdef RS2_USE_CUDA
+    rsimpl::split_frame_y16_y16_from_y12i_cuda(dest, count, reinterpret_cast<const y12i_pixel *>(source));
+#else
+    split_frame(dest, count, reinterpret_cast<const y12i_pixel *>(source),
+        [](const y12i_pixel & p) -> uint16_t { return p.l() << 6 | p.l() >> 4; },  // We want to convert 10-bit data to 16-bit data
+        [](const y12i_pixel & p) -> uint16_t { return p.r() << 6 | p.r() >> 4; }); // Multiply by 64 1/16 to efficiently approximate 65535/1023
+#endif
     }
 
     struct f200_inzi_pixel { uint16_t z16; uint8_t y8; };
@@ -1037,18 +1054,36 @@ for (int i = 0; i < n / 16; i++)
 
     void unpack_z16_y8_from_sr300_inzi(byte * const dest[], const byte * source, int count)
     {
+        auto now = std::chrono::high_resolution_clock::now();
         auto in = reinterpret_cast<const uint16_t *>(source);
         auto out_ir = reinterpret_cast<uint8_t *>(dest[1]);
+#ifdef RS2_USE_CUDA
+        rsimpl::unpack_z16_y8_from_sr300_inzi_cuda(out_ir, in, count);
+#else
         for(int i=0; i<count; ++i) *out_ir++ = *in++ >> 2;
+#endif
         librealsense::copy(dest[0], in, count*2);
+        // record time
+        auto now2 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now2 - now).count();
+        LOG_ERROR(elapsed);
     }
 
     void unpack_z16_y16_from_sr300_inzi (byte * const dest[], const byte * source, int count)
     {
+        auto now = std::chrono::high_resolution_clock::now();
         auto in = reinterpret_cast<const uint16_t *>(source);
         auto out_ir = reinterpret_cast<uint16_t *>(dest[1]);
+#ifdef RS2_USE_CUDA
+        rsimpl::unpack_z16_y16_from_sr300_inzi_cuda(out_ir, in, count);
+#else
         for(int i=0; i<count; ++i) *out_ir++ = *in++ << 6;
+#endif
         librealsense::copy(dest[0], in, count*2);
+        // record time
+        auto now2 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now2 - now).count();
+        LOG_ERROR(elapsed);
     }
 
     void unpack_rgb_from_bgr(byte * const dest[], const byte * source, int count)

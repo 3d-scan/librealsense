@@ -9,6 +9,7 @@
 #include "proc/occlusion-filter.h"
 #include "proc/pointcloud.h"
 #include "option.h"
+#include "../cuda/cuda-pointcloud.cuh"
 
 namespace librealsense
 {
@@ -27,8 +28,11 @@ namespace librealsense
 
     const float3 * depth_to_points(uint8_t* image, const rs2_intrinsics &depth_intrinsics, const uint16_t * depth_image, float depth_scale)
     {
+#ifdef RS2_USE_CUDA
+        rsimpl::deproject_depth_cuda(reinterpret_cast<float *>(image), depth_intrinsics, depth_image, [depth_scale](uint16_t z) { return depth_scale * z; });
+#else
         deproject_depth(reinterpret_cast<float *>(image), depth_intrinsics, depth_image, [depth_scale](uint16_t z) { return depth_scale * z; });
-
+#endif
         return reinterpret_cast<float3 *>(image);
     }
 
