@@ -13,6 +13,7 @@
         static std::string s##T##_##X##_str = make_less_screamy(#X);\
         return s##T##_##X##_str.c_str(); }
 
+
 namespace librealsense
 {
     RS2_ENUM_HELPERS(rs2_rs400_visual_preset, RS400_VISUAL_PRESET)
@@ -33,6 +34,8 @@ namespace librealsense
         #undef CASE
     }
 }
+
+using namespace librealsense;
 
 const char* rs2_rs400_visual_preset_to_string(rs2_rs400_visual_preset preset){ return get_string(preset); }
 

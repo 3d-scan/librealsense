@@ -6,7 +6,7 @@
 #include "error-handling.h"
 
 
-void option::create_snapshot(std::shared_ptr<option>& snapshot) const
+void librealsense::option::create_snapshot(std::shared_ptr<option>& snapshot) const
 {
     snapshot = std::make_shared<const_value_option>(get_description(), query());
 }

@@ -36,6 +36,8 @@
 // API implementation //
 ////////////////////////
 
+using namespace librealsense;
+
 struct rs2_stream_profile_list
 {
     std::vector<std::shared_ptr<stream_profile_interface>> list;
