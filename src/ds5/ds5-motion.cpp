@@ -58,7 +58,7 @@ namespace librealsense
         {
         }
 
-        rs2_motion_device_intrinsic get_motion_intrinsics(rs2_stream stream) const 
+        rs2_motion_device_intrinsic get_motion_intrinsics(rs2_stream stream) const
         {
             return _owner->get_motion_intrinsics(stream);
         }
@@ -84,7 +84,7 @@ namespace librealsense
                 //set motion intrinsics
                 if (p->get_stream_type() == RS2_STREAM_ACCEL || p->get_stream_type() == RS2_STREAM_GYRO)
                 {
-                    auto motion = dynamic_cast<motion_stream_profile_interface*>(p.get()); 
+                    auto motion = dynamic_cast<motion_stream_profile_interface*>(p.get());
                     assert(motion); //Expecting to succeed for motion stream (since we are under the "if")
                     auto st = p->get_stream_type();
                     motion->set_intrinsics([this, st]() { return get_motion_intrinsics(st); });
@@ -237,6 +237,10 @@ namespace librealsense
                                                                             std::map<float, std::string>{{0.f, "Static"},
                                                                                                          {1.f, "Anti-Flicker"},
                                                                                                          {2.f, "Hybrid"}}));
+        uvc_ep->register_option(RS2_OPTION_AUTO_EXPOSURE_CONVERGE_STEP,
+                                std::make_shared<auto_exposure_step_option>(auto_exposure,
+                                                                            ae_state,
+                                                                            option_range{ 0.1f, 1.0f, 0.1f, ae_step_default_value }));
         uvc_ep->register_option(RS2_OPTION_POWER_LINE_FREQUENCY,
                                 std::make_shared<auto_exposure_antiflicker_rate_option>(auto_exposure,
                                                                                         ae_state,
@@ -360,7 +364,7 @@ namespace librealsense
         _fisheye_device_idx = add_sensor(fisheye_ep);
 
         // Not applicable for TM1
-        //_depth_to_fisheye = std::make_shared<lazy<rs2_extrinsics>>([this]() 
+        //_depth_to_fisheye = std::make_shared<lazy<rs2_extrinsics>>([this]()
         //{
         //    auto extr = get_fisheye_extrinsics_data(*_fisheye_extrinsics_raw);
         //    return from_pose(inverse(extr));

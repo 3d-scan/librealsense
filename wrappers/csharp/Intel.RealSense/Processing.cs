@@ -71,12 +71,12 @@ namespace Intel.RealSense
             NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
         }
 
-        public VideoFrame Colorize(VideoFrame original)
+        public VideoFrame Colorize(VideoFrame original, FramesReleaser releaser = null)
         {
             object error;
             NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
             NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
-            return queue.WaitForFrame() as VideoFrame;
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrame() as VideoFrame);
         }
 
         FrameQueue queue;
@@ -92,12 +92,34 @@ namespace Intel.RealSense
             NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
         }
 
-        public FrameSet Process(FrameSet original)
+        public FrameSet Process(FrameSet original, FramesReleaser releaser = null)
         {
             object error;
             NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
             NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
-            return queue.WaitForFrames();
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrames() as FrameSet);
+        }
+
+        FrameQueue queue;
+    }
+
+    public class DisparityTransform : ProcessingBlock
+    {
+        public DisparityTransform(bool transform_to_disparity = true)
+        {
+            object error;
+            byte transform_direction = transform_to_disparity ? (byte)1 : (byte)0;
+            m_instance = new HandleRef(this, NativeMethods.rs2_create_disparity_transform_block(transform_direction, out error));
+            queue = new FrameQueue();
+            NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
+        }
+
+        public VideoFrame ApplyFilter(VideoFrame original, FramesReleaser releaser = null)
+        {
+            object error;
+            NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
+            NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrame() as VideoFrame);
         }
 
         FrameQueue queue;
@@ -113,12 +135,12 @@ namespace Intel.RealSense
             NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
         }
 
-        public VideoFrame ApplyFilter(VideoFrame original)
+        public VideoFrame ApplyFilter(VideoFrame original, FramesReleaser releaser = null)
         {
             object error;
             NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
             NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
-            return queue.WaitForFrame() as VideoFrame;
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrame() as VideoFrame);
         }
 
         FrameQueue queue;
@@ -134,12 +156,12 @@ namespace Intel.RealSense
             NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
         }
 
-        public VideoFrame ApplyFilter(VideoFrame original)
+        public VideoFrame ApplyFilter(VideoFrame original, FramesReleaser releaser = null)
         {
             object error;
             NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
             NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
-            return queue.WaitForFrame() as VideoFrame;
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrame() as VideoFrame);
         }
 
         FrameQueue queue;
@@ -155,6 +177,27 @@ namespace Intel.RealSense
             NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
         }
 
+        public VideoFrame ApplyFilter(VideoFrame original, FramesReleaser releaser = null)
+        {
+            object error;
+            NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
+            NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrame() as VideoFrame);
+        }
+
+        FrameQueue queue;
+    }
+
+    public class HoleFillingFilter : ProcessingBlock
+    {
+        public HoleFillingFilter()
+        {
+            object error;
+            m_instance = new HandleRef(this, NativeMethods.rs2_create_hole_filling_filter_block(out error));
+            queue = new FrameQueue();
+            NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
+        }
+
         public VideoFrame ApplyFilter(VideoFrame original)
         {
             object error;
@@ -165,7 +208,6 @@ namespace Intel.RealSense
 
         FrameQueue queue;
     }
-
 
     public class PointCloud : ProcessingBlock
     {
@@ -179,13 +221,116 @@ namespace Intel.RealSense
             NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
         }
 
-        public Points Calculate(Frame original)
+        public Points Calculate(Frame original, FramesReleaser releaser = null)
         {
             object error;
             NativeMethods.rs2_frame_add_ref(original.m_instance.Handle, out error);
             NativeMethods.rs2_process_frame(m_instance.Handle, original.m_instance.Handle, out error);
-            return queue.WaitForFrame() as Points;
+            return FramesReleaser.ScopedReturn(releaser, queue.WaitForFrame() as Points);
+        }
+
+        public void MapTexture(VideoFrame texture)
+        {
+            object error;
+            Options[Option.TextureSource].Value = Convert.ToSingle(texture.Profile.UniqueID);
+            NativeMethods.rs2_frame_add_ref(texture.m_instance.Handle, out error);
+            NativeMethods.rs2_process_frame(m_instance.Handle, texture.m_instance.Handle, out error);
         }
     }
 
+    public class FrameSource
+    {
+        internal HandleRef m_instance;
+
+        internal FrameSource(HandleRef instance)
+        {
+            m_instance = instance;
+        }
+
+        public FrameSet AllocateCompositeFrame(FramesReleaser releaser, params Frame[] frames)
+        {
+            object error;
+            var frame_refs = frames.Select(x => x.m_instance.Handle).ToArray();
+            foreach (var fref in frame_refs) NativeMethods.rs2_frame_add_ref(fref, out error);
+            var frame_ref = NativeMethods.rs2_allocate_composite_frame(m_instance.Handle, frame_refs, frames.Count(), out error);
+            return FramesReleaser.ScopedReturn(releaser, new FrameSet(frame_ref));
+        }
+
+        public FrameSet AllocateCompositeFrame(params Frame[] frames)
+        {
+            return AllocateCompositeFrame(null, frames);
+        }
+
+        public void FrameReady(Frame f)
+        {
+            object error;
+            NativeMethods.rs2_frame_add_ref(f.m_instance.Handle, out error);
+            NativeMethods.rs2_synthetic_frame_ready(m_instance.Handle, f.m_instance.Handle, out error);
+        }
+
+        public void FramesReady(FrameSet fs)
+        {
+            using (var f = fs.AsFrame())
+                FrameReady(f);
+        }
+    }
+
+    public class CustomProcessingBlock : ProcessingBlock
+    {
+        public delegate void FrameProcessorCallback(Frame frame, FrameSource source);
+
+        public CustomProcessingBlock(FrameProcessorCallback cb)
+        {
+            object error;
+            frame_processor_callback cb2 = (IntPtr f, IntPtr src, IntPtr u) =>
+            {
+                using (var frame = new Frame(f))
+                    cb(frame, new FrameSource(new HandleRef(this, src)));
+            };
+            m_proc_callback = cb2;
+            m_instance = new HandleRef(this, NativeMethods.rs2_create_processing_block_fptr(cb2, IntPtr.Zero, out error));
+        }
+
+        public void ProcessFrame(Frame f)
+        {
+            object error;
+            NativeMethods.rs2_frame_add_ref(f.m_instance.Handle, out error);
+            NativeMethods.rs2_process_frame(m_instance.Handle, f.m_instance.Handle, out error);
+        }
+
+        public void ProcessFrames(FrameSet fs)
+        {
+            using (var f = fs.AsFrame())
+                ProcessFrame(f);
+        }
+
+        public void Start(FrameQueue queue)
+        {
+            object error;
+            NativeMethods.rs2_start_processing_queue(m_instance.Handle, queue.m_instance.Handle, out error);
+
+            m_callback = null;
+            m_queue = queue;
+        }
+
+        //public delegate void FrameCallback<Frame, T>(Frame frame, T user_data);
+        public delegate void FrameCallback(Frame frame);
+
+        public void Start(FrameCallback cb)
+        {
+            object error;
+            frame_callback cb2 = (IntPtr f, IntPtr u) =>
+            {
+                using (var frame = new Frame(f))
+                    cb(frame);
+            };
+            NativeMethods.rs2_start_processing_fptr(m_instance.Handle, cb2, IntPtr.Zero, out error);
+            m_callback = cb2;
+            m_queue = null;
+        }
+
+        private frame_callback m_callback = null;
+        private frame_processor_callback m_proc_callback = null;
+        private FrameQueue m_queue = null;
+    }
 }

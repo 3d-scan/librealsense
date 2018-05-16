@@ -15,9 +15,11 @@ const fs = require('fs');
  * A RealSense camera
  */
 class Device {
-  constructor(dev) {
-    this.cxxDev = dev;
-    internal.addObject(this);
+  constructor(cxxDev, autoDelete = true) {
+    this.cxxDev = cxxDev;
+    if (autoDelete) {
+      internal.addObject(this);
+    }
   }
 
   /**
@@ -40,8 +42,6 @@ class Device {
     sensors.forEach((s) => {
       if (s.isDepthSensor()) {
         array.push(new DepthSensor(s));
-      } else if (s.isROISensor()) {
-        array.push(new ROISensor(s));
       } else {
         array.push(new Sensor(s));
       }
@@ -83,6 +83,10 @@ class Device {
    * <br> undefined is not supported.
    * @property {Boolean|undefined} cameraLocked - True if EEPROM is locked. <br> undefined is not
    * supported.
+   * @property {String|undefined} usbTypeDescriptor - Designated USB specification: USB2/USB3.
+   * <br> undefined is not supported.
+   * @property {String|undefined} recommendedFirmwareVersion - Latest firmware version.
+   * <br> undefined is not supported.
    * @see [Device.getCameraInfo()]{@link Device#getCameraInfo}
    */
 
@@ -96,8 +100,8 @@ class Device {
    *
    * @param {String|Integer} [info] - the camera_info type, see {@link camera_info} for available
    * values
-   * @return {CameraInfoObject} if no argument is provided, {CameraInfoObject} is returned.
-   * If a camera_info is provided, the specific camera info value is returned.
+   * @return {CameraInfoObject|String|undefined} if no argument is provided, {CameraInfoObject} is
+   * returned. If a camera_info is provided, the specific camera info value string is returned.
    */
   getCameraInfo(info) {
     const funcName = 'Device.getCameraInfo()';
@@ -129,10 +133,18 @@ class Device {
       if (this.cxxDev.supportsCameraInfo(camera_info.CAMERA_INFO_CAMERA_LOCKED)) {
         result.cameraLocked = this.cxxDev.getCameraInfo(camera_info.CAMERA_INFO_CAMERA_LOCKED);
       }
+      if (this.cxxDev.supportsCameraInfo(camera_info.CAMERA_INFO_USB_TYPE_DESCRIPTOR)) {
+        result.usbTypeDescriptor = this.cxxDev.getCameraInfo(
+            camera_info.CAMERA_INFO_USB_TYPE_DESCRIPTOR);
+      }
+      if (this.cxxDev.supportsCameraInfo(camera_info.CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION)) {
+        result.recommendedFirmwareVersion = this.cxxDev.getCameraInfo(
+            camera_info.CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION);
+      }
       return result;
     } else {
       const val = checkArgumentType(arguments, constants.camera_info, 0, funcName);
-      return this.cxxDev.getCameraInfo(val);
+      return (this.cxxDev.supportsCameraInfo(val) ? this.cxxDev.getCameraInfo(val) : undefined);
     }
   }
 
@@ -516,7 +528,7 @@ class VideoStreamProfile extends StreamProfile {
 
   /**
    * When called on a VideoStreamProfile, returns the intrinsics of specific stream configuration
-   * @return {IntrinsicsObject}
+   * @return {IntrinsicsObject|undefined}
    */
   getIntrinsics() {
     return this.cxxProfile.getVideoStreamIntrinsics();
@@ -614,6 +626,9 @@ class Options {
     if (!this.cxxObj.supportsOption(o) || this.cxxObj.isOptionReadonly(o)) {
       return undefined;
     }
+    if (!this._internalIsOptionValueInRange(o, value)) {
+      return undefined;
+    }
     this.cxxObj.setOption(o, value);
   }
 
@@ -667,6 +682,11 @@ class Options {
     }
     return this.cxxObj.getOptionValueDescription(o, value);
   }
+
+  _internalIsOptionValueInRange(option, value) {
+    let range = this.getOptionRange(option);
+    return (range && value >= range.minValue && value <= range.maxValue);
+  }
 }
 
 /**
@@ -675,12 +695,16 @@ class Options {
 class Sensor extends Options {
   /**
    * Construct a Sensor object, representing a RealSense camera subdevice
+   * By default, native resources associated with a Sensor object are freed
+   * automatically during cleanup.
    */
-  constructor(sensor) {
-    super(sensor);
-    this.cxxSensor = sensor;
+  constructor(cxxSensor, autoDelete = true) {
+    super(cxxSensor);
+    this.cxxSensor = cxxSensor;
     this._events = new EventEmitter();
-    internal.addObject(this);
+    if (autoDelete === true) {
+      internal.addObject(this);
+    }
   }
 
   /**
@@ -748,7 +772,7 @@ class Sensor extends Options {
     const funcName = 'Sensor.getCameraInfo()';
     checkArgumentLength(1, 1, arguments.length, funcName);
     const i = checkArgumentType(arguments, constants.camera_info, 0, funcName);
-    return this.cxxSensor.getCameraInfo(i);
+    return (this.cxxSensor.supportsCameraInfo(i) ? this.cxxSensor.getCameraInfo(i) : undefined);
   }
 
   /**
@@ -765,7 +789,7 @@ class Sensor extends Options {
   * @return {undefined} No return value
   */
   destroy() {
-    this.events_ = null;
+    this._events = null;
     if (this.cxxSensor) {
       this.cxxSensor.destroy();
       this.cxxSensor = undefined;
@@ -861,6 +885,7 @@ class Sensor extends Options {
    * @property {Float}  timestamp - The timestamp of the notification
    * @property {String} severity - The severity of the notification
    * @property {String} category - The category of the notification
+   * @property {String} serializedData - The serialized data of the notification
    */
 
   /**
@@ -871,6 +896,7 @@ class Sensor extends Options {
    * @param {Float}  info.timestamp - See {@link NotificationEventObject} for details
    * @param {String} info.severity - See {@link NotificationEventObject} for details
    * @param {String} info.category - See {@link NotificationEventObject} for details
+   * @param {String} info.serializedData - See {@link NotificationEventObject} for details
    *
    * @see {@link NotificationEventObject}
    * @see [Sensor.setNotificationsCallback()]{@link Sensor#setNotificationsCallback}
@@ -883,6 +909,7 @@ class Sensor extends Options {
    * @param {Float}  evt.timestamp - See {@link NotificationEventObject} for details
    * @param {String} evt.severity - See {@link NotificationEventObject} for details
    * @param {String} evt.category - See {@link NotificationEventObject} for details
+   * @param {String} evt.serializedData - See {@link NotificationEventObject} for details
    * @see {@link NotificationEventObject}
    * @see [Sensor.setNotificationsCallback()]{@link Sensor#setNotificationsCallback}
    */
@@ -936,11 +963,26 @@ class Sensor extends Options {
  */
 class ROISensor extends Sensor {
   /**
-   * Construct a ROISensor object, representing a RealSense camera subdevice
-   *
+   * Create a ROISensor out of another sensor
+   * @param {Sensor} sensor a sensor object
+   * @return {ROISensor|undefined} return a ROISensor if the sensor can be
+   * treated as a ROISensor, otherwise return undefined.
    */
-   constructor(sensor) {
-    super(sensor);
+  static from(sensor) {
+    if (sensor.cxxSensor.isROISensor()) {
+      return new ROISensor(sensor.cxxSensor);
+    }
+    return undefined;
+  }
+
+  /**
+   * Construct a ROISensor object, representing a RealSense camera subdevice
+   * The newly created ROISensor object shares native resources with the sensor
+   * argument. So the new object shouldn't be freed automatically to make
+   * sure resources released only once during cleanup.
+   */
+   constructor(cxxSensor) {
+    super(cxxSensor, false);
   }
 
   /**
@@ -1002,11 +1044,11 @@ class ROISensor extends Sensor {
       minY = arguments[1];
       maxX = arguments[2];
       maxY = arguments[3];
-      this.cxxSensor.setRegionOfInterest(minX, minY, maxX, maxY);
     } else {
       throw new TypeError(
           'setRegionOfInterest(region) expects a RegionOfInterestObject as argument');
     }
+    this.cxxSensor.setRegionOfInterest(minX, minY, maxX, maxY);
   }
 }
 
@@ -1034,6 +1076,19 @@ class DepthSensor extends Sensor {
 const internal = {
   ctx: [],
   objs: [],
+
+  // Register error callback to native code
+  registerErrorCallback: function() {
+    RS2.registerErrorCallback(this, 'errorCallback');
+  },
+
+  // The callback method called from native side
+  errorCallback: function(error) {
+    if (error.recoverable === false) {
+      throw new TypeError('Unrecoverable error, native function ' + error.nativeFunction + ': ' +
+          error.description);
+    }
+  },
 
   addContext: function(c) {
     this.ctx.push(c);
@@ -1212,14 +1267,18 @@ class Context {
    * Create a PlaybackDevice to playback recored data file.
    *
    * @param {String} file - the file path
-   * @return {PlaybackDevice}
+   * @return {PlaybackDevice|undefined}
    */
   loadDevice(file) {
     const funcName = 'Context.loadDevice()';
     checkArgumentLength(1, 1, arguments.length, funcName);
     checkArgumentType(arguments, 'string', 0, funcName);
     checkFileExistence(file);
-    return new PlaybackDevice(this.cxxCtx.loadDeviceFile(file), file);
+    const cxxDev = this.cxxCtx.loadDeviceFile(file);
+    if (!cxxDev) {
+      return undefined;
+    }
+    return new PlaybackDevice(cxxDev, true);
   }
 
   /**
@@ -1283,51 +1342,99 @@ class PlaybackContext extends Context {
 
 /**
  * This class provides the ability to record a live session of streaming to a file
- * Here is an examples:
+ *
+ * There are 2 ways for users to create a RecorderDevice:
  * <pre><code>
- * let ctx = new rs2.Context();
- * let dev = ctx.queryDevices().devices[0];
- * // record to file record.bag
- * let recorder = new rs2.RecorderDevice('record.bag', dev);
- * let sensors = recorder.querySensors();
- * let sensor = sensors[0];
- * let profiles = sensor.getStreamProfiles();
+ *  Syntax 1. RecorderDevice.from(device);
+ *  Syntax 2. new RecorderDevice(file, device);
+ * </code></pre>
  *
- * for (let i =0; i < profiles.length; i++) {
- *   if (profiles[i].streamType === rs2.stream.STREAM_DEPTH &&
- *       profiles[i].fps === 30 &&
- *       profiles[i].width === 640 &&
- *       profiles[i].height === 480 &&
- *       profiles[i].format === rs2.format.FORMAT_Z16) {
- *     sensor.open(profiles[i]);
- *   }
- * }
+ * Syntax 1 can only be applied to device that can be converted to RecorderDevice, see
+ * below example:
+ * <pre><code>
+ *  const file = 'record.bag';
+ *  let cfg = new rs2.Config();
+ *  cfg.enableRecordToFile(file);
+ *  let pipe = new rs2.Pipeline();
+ *  pipe.start(cfg);
+ *  let device = pipe.getActiveProfile().getDevice();
+ *  let recorder = rs2.RecorderDevice.from(device);
  *
- * // record 10 frames
- * let cnt = 0;
- * sensor.start((frame) => {
- *   cnt++;
- *   if (cnt === 10) {
- *     // stop recording
- *     recorder.reset();
- *     rs2.cleanup();
- *     console.log('Recorded ', cnt, ' frames');
- *   }
- * })
+ *  // record 10 frames.
+ *  for (let i = 0; i < 10; i++) {
+ *    let frames = pipe.waitForFrames();
+ *  }
+ *
+ *  pipe.stop();
+ *  // cleanup and make sure the recorded frames are flushed to file
+ *  rs2.cleanup();
+ * </code></pre>
+ *
+ * Syntax 2 is to create a RecorderDevice from a live device, see below example:
+ * <pre><code>
+ *  let ctx = new rs2.Context();
+ *  let dev = ctx.queryDevices().devices[0];
+ *  // record to file record.bag
+ *  let recorder = new rs2.RecorderDevice('record.bag', dev);
+ *  let sensors = recorder.querySensors();
+ *  let sensor = sensors[0];
+ *  let profiles = sensor.getStreamProfiles();
+ *
+ *  for (let i =0; i < profiles.length; i++) {
+ *    if (profiles[i].streamType === rs2.stream.STREAM_DEPTH &&
+ *        profiles[i].fps === 30 &&
+ *        profiles[i].width === 640 &&
+ *        profiles[i].height === 480 &&
+ *        profiles[i].format === rs2.format.FORMAT_Z16) {
+ *      sensor.open(profiles[i]);
+ *    }
+ *  }
+ *
+ *  // record 10 frames
+ *  let cnt = 0;
+ *  sensor.start((frame) => {
+ *    cnt++;
+ *    if (cnt === 10) {
+ *      // stop recording
+ *      recorder.reset();
+ *      rs2.cleanup();
+ *      console.log('Recorded ', cnt, ' frames');
+ *    }
+ *  })
  * </code></pre>
  * @extends Device
  */
 class RecorderDevice extends Device {
   /**
+   * Create a RecorderDevice from another device
+   *
+   * @param {Device} device another existing device
+   * @return {RecorderDevice|undefined} If the the input device can be
+   * converted to a RecorderDevice, return the newly created RecorderDevice,
+   * otherwise, undefined is returned.
+   */
+  static from(device) {
+    return device.cxxDev.isRecorder() ?
+        new RecorderDevice(null, null, device.cxxDev, false) : undefined;
+  }
+
+  /**
    * @param {String} file the file name to store the recorded data
    * @param {Device} device the actual device to be recorded
    */
-  constructor(file, device) {
+  constructor(file, device, cxxDev = undefined, autoDelete = true) {
     const funcName = 'RecorderDevice.constructor()';
-    checkArgumentLength(2, 2, arguments.length, funcName);
-    checkArgumentType(arguments, 'string', 0, funcName);
-    checkArgumentType(arguments, Device, 1, funcName);
-    super(device.cxxDev.spawnRecorderDevice(file));
+    checkArgumentLength(2, 4, arguments.length, funcName);
+    if (arguments[0] && arguments[1]) {
+      checkArgumentType(arguments, 'string', 0, funcName);
+      checkArgumentType(arguments, Device, 1, funcName);
+    } else if (arguments[2]) {
+      checkArgumentType(arguments, 'object', 2, funcName);
+      checkArgumentType(arguments, 'boolean', 3, funcName);
+    } else {
+      throw new TypeError('Invalid parameters for new RecorderDevice()');
+    }
+    super(cxxDev ? cxxDev : device.cxxDev.spawnRecorderDevice(file), autoDelete);
   }
   /**
    * Pause the recording device without stopping the actual device from streaming.
@@ -1341,44 +1448,89 @@ class RecorderDevice extends Device {
   resume() {
     this.cxxDev.resumeRecord();
   }
+  /**
+   * Gets the name of the file to which the recorder is writing
+   * @return {String}
+   */
+  get fileName() {
+    return this.cxxDev.getFileName();
+  }
 }
 
 /**
  * This class is used to playback the file recorded by RecorderDevice
- * Here is an example:
+ * There are 2 ways for users to create a PlaybackDevice:
  * <pre><code>
- * let ctx = new rs2.Context();
- * // load the recorded file
- * let dev = ctx.loadDevice('record.bag');
- * let sensors = dev.querySensors();
- * let sensor = sensors[0];
- * let profiles = sensor.getStreamProfiles();
- * let cnt = 0;
+ *  Syntax 1: PlaybackDevice.from(device)
+ *  Syntax 2: Context.loadDevice(filePath)
+ * </code></pre>
  *
- * // when received 'stopped' status, stop playback
- * dev.setStatusChangedCallback((status) => {
- *   console.log('playback status: ', status);
- *   if (status.description === 'stopped') {
- *     dev.stop();
- *     ctx.unloadDevice('record.bag');
- *     rs2.cleanup();
- *     console.log('Playback ', cnt, ' frames');
- *   }
- * });
- *
- * // start playback
- * sensor.open(profiles);
- * sensor.start((frame) => {
- *   cnt ++;
- * });
+ * Syntax 1 is to convert an existing device to a PlaybackDevice which can only be
+ * applied to device that can be converted. Here is an example:
  * <pre><code>
+ *  const file = 'record.bag';
+ *  let cfg = new rs2.Config();
+ *  cfg.enableDeviceFromFile(file);
+ *  let pipe = new rs2.Pipeline();
+ *  pipe.start(cfg);
+ *  let device = pipe.getActiveProfile().getDevice();
+ *  let playback = rs2.PlaybackDevice.from(device);
+ *
+ *  for (let i = 0; i < 10; i++) {
+ *    let frames = pipe.waitForFrames();
+ *  }
+ *
+ *  pipe.stop();
+ *  rs2.cleanup();
+ * </code></pre>
+ *
+ * Syntax 2 is to create a PlaybackDevice through Context. Here is an example:
+ * <pre><code>
+ *  let ctx = new rs2.Context();
+ *  // load the recorded file
+ *  let dev = ctx.loadDevice('record.bag');
+ *  let sensors = dev.querySensors();
+ *  let sensor = sensors[0];
+ *  let profiles = sensor.getStreamProfiles();
+ *  let cnt = 0;
+ *
+ *  // when received 'stopped' status, stop playback
+ *  dev.setStatusChangedCallback((status) => {
+ *    console.log('playback status: ', status);
+ *    if (status.description === 'stopped') {
+ *      dev.stop();
+ *      ctx.unloadDevice('record.bag');
+ *      rs2.cleanup();
+ *      console.log('Playback ', cnt, ' frames');
+ *    }
+ *  });
+ *
+ *  // start playback
+ *  sensor.open(profiles);
+ *  sensor.start((frame) => {
+ *    cnt ++;
+ *  });
+ * </code></pre>
  * @extends Device
  * @see [Context.loadDevice]{@link Context#loadDevice}
  */
 class PlaybackDevice extends Device {
-  constructor(cxxdevice, file) {
-    super(cxxdevice);
-    this.file = file;
+  /**
+   * Create a PlaybackDevice from another device
+   *
+   * @param {Device} device another existing device that can be converted to a
+   * PlaybackDevice
+   * @return {PlaybackDevice|undefined} If the the input device can be
+   * converted to a PlaybackDevice, return the newly created PlaybackDevice,
+   * otherwise, undefined is returned.
+   */
+  static from(device) {
+    return device.cxxDev.isPlayback() ?
+        new PlaybackDevice(device.cxxDev, false) : undefined;
+  }
+
+  constructor(cxxdevice, autoDelete) {
+    super(cxxdevice, autoDelete);
     this._events = new EventEmitter();
   }
   /**
@@ -1411,7 +1563,7 @@ class PlaybackDevice extends Device {
    * @return {String}
    */
   get fileName() {
-    return this.file;
+    return this.cxxDev.getFileName();
   }
   /**
    * Retrieves the current position of the playback in the file in terms of time. Unit is
@@ -1531,9 +1683,11 @@ internal.PlaybackContext = PlaybackContext;
  * In addition, given non-depth frame, the block will align texture coordinate to the non-depth
  * stream
  */
-class PointCloud {
+class PointCloud extends Options {
   constructor() {
+    super();
     this.cxxPointCloud = new RS2.RSPointCloud();
+    this.setCxxOptionsObject(this.cxxPointCloud);
     this.pointsFrame = new Points();
   }
 
@@ -1644,6 +1798,7 @@ class Align {
     const s = checkArgumentType(arguments, constants.stream, 0, funcName);
     this.cxxAlign = new RS2.RSAlign(s);
     this.frameSet = new FrameSet();
+    internal.addObject(this);
   }
 
   /**
@@ -1694,8 +1849,7 @@ class Align {
  * @property {Integer} streamType - The stream type of the frame.
  * see <code>enum {@link stream}</code>
  * @property {Integer} bitsPerPixel - The number of bits per pixel
- * @property {string} timestampDomain - Get the domain (clock name) of timestamp value.
- *
+ * @property {Integer} timestampDomain - Get the domain (clock name) of timestamp value.
  */
 class Frame {
   constructor(cxxFrame) {
@@ -1923,10 +2077,10 @@ class Frame {
  *
  * @property {Integer} width - The image width in pixels.
  * @property {Integer} height - The image height in pixels.
+ * @property {Integer} dataByteLength - The length in bytes
  * @property {Integer} strideInBytes - The stride of the frame. The unit is number of bytes.
  * @property {Integer} bitsPerPixel - The number of bits per pixel
- * @property {string} timestampDomain - Get the domain (clock name) of timestamp value.
- *
+ * @property {Integer} bytesPerPixel - The number of bytes per pixel
  */
 class VideoFrame extends Frame {
   constructor(frame) {
@@ -2193,11 +2347,10 @@ class PoseFrame extends Frame {
 
   /**
    * Get the pose data
-   * @return {PoseData}
+   * @return {PoseData|undefined}
    */
   get poseData() {
-    this.cxxFrame.getPoseData(this._pose);
-    return this._pose;
+    return (this.cxxFrame.getPoseData(this._pose)) ? this._pose : undefined;
   }
 }
 
@@ -2212,6 +2365,7 @@ class FrameSet {
   constructor(cxxFrameSet) {
     this.cxxFrameSet = cxxFrameSet || new RS2.RSFrameSet();
     this.cache = [];
+    this.cacheMetadata = [];
     this.__update();
   }
 
@@ -2230,7 +2384,7 @@ class FrameSet {
    * @return {DepthFrame|undefined}
    */
   get depthFrame() {
-    return this.getFrame(stream.STREAM_DEPTH);
+    return this.getFrame(stream.STREAM_DEPTH, 0);
   }
 
   /**
@@ -2239,20 +2393,36 @@ class FrameSet {
    * @return {VideoFrame|undefined}
    */
   get colorFrame() {
-    return this.getFrame(stream.STREAM_COLOR);
+    return this.getFrame(stream.STREAM_COLOR, 0);
+  }
+
+  /**
+   * Get the infrared frame
+   * @param {Integer} streamIndex index of the expected infrared stream
+   * @return {VideoFrame|undefined}
+   */
+  getInfraredFrame(streamIndex = 0) {
+    const funcName = 'FrameSet.getInfraredFrame()';
+    checkArgumentLength(0, 1, arguments.length, funcName);
+    if (arguments.length === 1) {
+      checkArgumentType(arguments, 'integer', 0, funcName);
+    }
+    return this.getFrame(stream.STREAM_INFRARED, streamIndex);
   }
 
   /**
    * Get the frame at specified index
    *
-   * @param {Integer} index the index of the expected frame
+   * @param {Integer} index the index of the expected frame (Note: this is not
+   * stream index)
    * @return {DepthFrame|VideoFrame|Frame|undefined}
    */
   at(index) {
     const funcName = 'FrameSet.at()';
     checkArgumentLength(1, 1, arguments.length, funcName);
-    checkArgumentType(arguments, 'number', 0, 'FrameSet.at()', 0, this.size);
-    return this.getFrame(this.cxxFrameSet.indexToStream(index));
+    checkArgumentType(arguments, 'number', 0, funcName, 0, this.size);
+    return this.getFrame(this.cxxFrameSet.indexToStream(index),
+        this.cxxFrameSet.indexToStreamIndex(index));
   }
 
   /**
@@ -2270,36 +2440,57 @@ class FrameSet {
     }
   }
 
-  __internalGetFrame(stream) {
-    return Frame._internalCreateFrame(this.cxxFrameSet.getFrame(stream));
+  __internalGetFrame(stream, streamIndex) {
+    return Frame._internalCreateFrame(this.cxxFrameSet.getFrame(stream, streamIndex));
   }
 
-  __internalGetFrameCache(stream, callback) {
-    if (! this.cache[stream]) {
-      this.cache[stream] = callback(stream);
+  __internalFindFrameInCache(stream, streamIndex) {
+    for (const [i, data] of this.cacheMetadata.entries()) {
+      if (data.stream !== stream) {
+        continue;
+      }
+      if (!streamIndex || (streamIndex && streamIndex === data.streamIndex)) {
+        return i;
+      }
+    }
+    return undefined;
+  }
+
+  __internalGetFrameCache(stream, streamIndex, callback) {
+    let idx = this.__internalFindFrameInCache(stream, streamIndex);
+    if (idx === undefined) {
+      this.cache.push(callback(stream, streamIndex));
+      this.cacheMetadata.push({stream: stream, streamIndex: streamIndex});
+      idx = this.cache.length - 1;
     } else {
-      let frame = this.cache[stream];
+      let frame = this.cache[idx];
       if (!frame.cxxFrame) {
         frame.cxxFrame = new RS2.RSFrame();
       }
-      if (! this.cxxFrameSet.replaceFrame(stream, frame.cxxFrame)) {
-        this.cache[stream] = undefined;
+      if (! this.cxxFrameSet.replaceFrame(stream, streamIndex, frame.cxxFrame)) {
+        this.cache[idx] = undefined;
+        this.cacheMetadata[idx] = undefined;
       }
     }
-    return this.cache[stream];
+    return this.cache[idx];
   }
 
   /**
    * Get the frame with specified stream
    *
    * @param {Integer|String} stream stream type of the frame
+   * @param {Integer} streamIndex index of the stream, 0 means the first
+   * matching stream
    * @return {DepthFrame|VideoFrame|Frame|undefined}
    */
-  getFrame(stream) {
+  getFrame(stream, streamIndex = 0) {
     const funcName = 'FrameSet.getFrame()';
-    checkArgumentLength(1, 1, arguments.length, funcName);
+    checkArgumentLength(1, 2, arguments.length, funcName);
     const s = checkArgumentType(arguments, constants.stream, 0, funcName);
-    return this.__internalGetFrameCache(s, this.__internalGetFrame.bind(this));
+    if (arguments.length === 2) {
+      checkArgumentType(arguments, 'integer', 1, funcName);
+    }
+    return this.__internalGetFrameCache(s, streamIndex, this.__internalGetFrame.bind(this));
   }
 
   __update() {
@@ -2312,6 +2503,8 @@ class FrameSet {
         f.release();
       }
     });
+    this.cache = [];
+    this.cacheMetadata = [];
   }
 
   release() {
@@ -2326,7 +2519,6 @@ class FrameSet {
    */
   destroy() {
     this.release();
-    this.cache = [];
     this.cxxFrameSet = undefined;
   }
 }
@@ -2697,13 +2889,15 @@ class Config {
    * config, and vise versa
    *
    * @param {String} fileName the playback file of the device
+   * @param {Boolean} repeat whether to repeat the playback automatically
    */
-  enableDeviceFromFile(fileName) {
+  enableDeviceFromFile(fileName, repeat = true) {
     const funcName = 'Config.enableDeviceFromFile()';
-    checkArgumentLength(1, 1, arguments.length, funcName);
+    checkArgumentLength(1, 2, arguments.length, funcName);
     checkArgumentType(arguments, 'string', 0, funcName);
+    checkArgumentType(arguments, 'boolean', 1, funcName);
     checkFileExistence(fileName);
-    this.cxxConfig.enableDeviceFromFile(fileName);
+    this.cxxConfig.enableDeviceFromFileRepeatOption(fileName, repeat);
   }
 
   /**
@@ -3878,6 +4072,16 @@ const stream = {
      * through GPIO . <br>Equivalent to its uppercase counterpart.
      */
     stream_gpio: 'gpio',
+    /**
+     * String literal of <code>'pose'</code>. <br>6 Degrees of Freedom pose data, calculated by
+     * RealSense device. <br>Equivalent to its uppercase counterpart.
+     */
+    stream_pose: 'pose',
+    /**
+     * String literal of <code>'confidence'</code>. <br>Confidence stream
+     * <br>Equivalent to its uppercase counterpart.
+     */
+    stream_confidence: 'confidence',
 
     /**
      * Any stream. <br>Equivalent to its lowercase counterpart.
@@ -3926,7 +4130,17 @@ const stream = {
      * @type {Integer}
      */
     STREAM_GPIO: RS2.RS2_STREAM_GPIO,
-
+    /**
+     * 6 Degrees of Freedom pose data, calculated by RealSense device. <br>Equivalent to its
+     * lowercase counterpart.
+     * @type {Integer}
+     */
+    STREAM_POSE: RS2.RS2_STREAM_POSE,
+    /**
+     * Confidence stream. <br>Equivalent to its lowercase counterpart.
+     * @type {Integer}
+     */
+    STREAM_CONFIDENCE: RS2.RS2_STREAM_CONFIDENCE,
     /**
      * Number of enumeration values. Not a valid input: intended to be used in for-loops.
      * @type {Integer}
@@ -3959,6 +4173,10 @@ const stream = {
           return this.stream_accel;
         case this.STREAM_GPIO:
           return this.stream_gpio;
+        case this.STREAM_POSE:
+          return this.stream_pose;
+        case this.STREAM_CONFIDENCE:
+          return this.stream_confidence;
       }
     },
 };
@@ -4251,6 +4469,12 @@ const option = {
    */
   option_stereo_baseline: 'stereo-baseline',
   /**
+   * String literal of <code>'auto-exposure-converage-step'</code>. <br>Allows dynamically ajust
+   * the converge step value of the target exposure in Auto-Exposure algorithm
+   * <br>Equivalent to its uppercase counterpart.
+   */
+  option_auto_exposure_converge_step: 'auto-exposure-converge-step',
+  /**
    * Enable / disable color backlight compensatio.<br>Equivalent to its lowercase counterpart.
    * @type {Integer}
    */
@@ -4471,17 +4695,24 @@ const option = {
    */
   OPTION_FILTER_SMOOTH_DELTA: RS2.RS2_OPTION_FILTER_SMOOTH_DELTA,
   /**
+   * Enhance depth data post-processing with holes filling where appropriate
+   * <br> Equivalent to its lowercase counterpart.
+   * @type {Integer}
+   */
+  OPTION_HOLES_FILL: RS2.RS2_OPTION_HOLES_FILL,
+  /**
    * The distance in mm between the first and the second imagers in stereo-based depth cameras
    * <br>Equivalent to its lowercase counterpart
    * @type {Integer}
    */
   OPTION_STEREO_BASELINE: RS2.RS2_OPTION_STEREO_BASELINE,
   /**
-   * Enhance depth data post-processing with holes filling where appropriate
-   * <br> Equivalent to its lowercase counterpart.
+   * Allows dynamically ajust the converge step value of the target exposure in Auto-Exposure
+   * algorithm
+   * <br>Equivalent to its lowercase counterpart
    * @type {Integer}
    */
-  OPTION_HOLES_FILL: RS2.RS2_OPTION_HOLES_FILL,
+  OPTION_AUTO_EXPOSURE_CONVERGE_STEP: RS2.RS2_OPTION_AUTO_EXPOSURE_CONVERGE_STEP,
   /**
    * Number of enumeration values. Not a valid input: intended to be used in for-loops.
    * @type {Integer}
@@ -4580,6 +4811,8 @@ const option = {
         return this.option_holes_fill;
       case this.OPTION_STEREO_BASELINE:
         return this.option_stereo_baseline;
+      case this.OPTION_AUTO_EXPOSURE_CONVERGE_STEP:
+        return this.option_auto_exposure_converge_step;
       default:
         throw new TypeError(
             'option.optionToString(option) expects a valid value as the 1st argument');
@@ -4640,7 +4873,16 @@ const camera_info = {
    * <br>Equivalent to its uppercase counterpart.
    */
   camera_info_camera_locked: 'camera-locked',
-
+  /**
+   * String literal of <code>'usb-type-descriptor'</code>. <br>Designated USB specification:
+   * USB2/USB3. <br>Equivalent to its uppercase counterpart.
+   */
+  camera_info_usb_type_descriptor: 'usb-type-descriptor',
+  /**
+   * String literal of <code>'recommended-firmware-version'</code>. <br>Latest firmware version
+   * available. <br>Equivalent to its uppercase counterpart.
+   */
+  camera_info_recommended_firmware_version: 'recommended-firmware-version',
   /**
    * Device friendly name. <br>Equivalent to its lowercase counterpart.
    * @type {Integer}
@@ -4683,7 +4925,16 @@ const camera_info = {
    * @type {Integer}
    */
   CAMERA_INFO_CAMERA_LOCKED: RS2.RS2_CAMERA_INFO_CAMERA_LOCKED,
-
+  /**
+   * Designated USB specification: USB2/USB3. <br>Equivalent to its lowercase counterpart.
+   * @type {Integer}
+   */
+  CAMERA_INFO_USB_TYPE_DESCRIPTOR: RS2.RS2_CAMERA_INFO_USB_TYPE_DESCRIPTOR,
+  /**
+   * Latest firmware version available. <br>Equivalent to its lowercase counterpart.
+   * @type {Integer}
+   */
+  CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION: RS2.RS2_CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION,
   /**
    * Number of enumeration values. Not a valid input: intended to be used in for-loops.
    * @type {Integer}
@@ -4716,6 +4967,10 @@ const camera_info = {
         return this.camera_info_product_id;
       case this.CAMERA_INFO_CAMERA_LOCKED:
         return this.camera_info_camera_locked;
+      case this.CAMERA_INFO_USB_TYPE_DESCRIPTOR:
+        return this.camera_info_usb_type_descriptor;
+      case this.CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION:
+        return this.camera_info_recommended_firmware_version;
     }
   },
 };
@@ -5080,7 +5335,11 @@ const notification_category = {
    * <br>Equivalent to its uppercase counterpart.
    */
   notification_category_unknown_error: 'unknown-error',
-
+  /**
+   * String literal of <code>'firmware-update-recommended'</code>. <br>Current firmware version
+   * installed is not the latest available. <br>Equivalent to its uppercase counterpart.
+   */
+  notification_category_firmware_update_recommended: 'firmware-update-recommended',
   /**
    * Frames didn't arrived within 5 seconds <br>Equivalent to its lowercase counterpart
    * @type {Integer}
@@ -5108,6 +5367,13 @@ const notification_category = {
    */
   NOTIFICATION_CATEGORY_UNKNOWN_ERROR: RS2.RS2_NOTIFICATION_CATEGORY_UNKNOWN_ERROR,
   /**
+   * Current firmware version installed is not the latest available <br>Equivalent to its lowercase
+   * counterpart
+   * @type {Integer}
+   */
+  NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED:
+      RS2.RS2_NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED,
+  /**
    * Number of enumeration values. Not a valid input: intended to be used in for-loops.
    * @type {Integer}
    */
@@ -5132,6 +5398,8 @@ const notification_category = {
         return this.notification_category_hardware_event;
       case this.NOTIFICATION_CATEGORY_UNKNOWN_ERROR:
         return this.notification_category_unknown_error;
+      case this.NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED:
+        return this.notification_category_firmware_update_recommended;
     }
   },
 };
@@ -5600,13 +5868,36 @@ const constants = {
   playback_status: playback_status,
 };
 
+/**
+ * Cleanup resources
+ */
 function cleanup() {
   internal.cleanup();
   RS2.globalCleanup();
 }
 
+/**
+ * Error Information returned from native SDK
+ * @typedef {Object} ErrorInfoObject
+ * @property {Boolean} recoverable - True if the error is a recoverable error
+ * @property {String} description - Detailed description of the error
+ * @property {String} nativeFunction - Native function that triggered the error
+ * @see [getError()]{@link getError}
+ */
+
+/**
+ * Get the error info
+ * User could call this method to get the detailed error info if the previous
+ * API failed.
+ * @return {ErrorInfoObject|undefined} If there is no error, undefined is returned
+ */
+function getError() {
+  return RS2.getError();
+}
+
 module.exports = {
   cleanup: cleanup,
+  getError: getError,
 
   Context: Context,
   Pipeline: Pipeline,
@@ -5662,3 +5953,5 @@ module.exports = {
 
   stringConstantToIntegerValue: str2Int,
 };
+
+internal.registerErrorCallback();

@@ -7,7 +7,6 @@
 #endif
 #endif
 
-#include <regex>
 #include <thread>
 #include <algorithm>
 #include <regex>
@@ -26,6 +25,8 @@
 
 #define ARCBALL_CAMERA_IMPLEMENTATION
 #include <arcball_camera.h>
+
+constexpr const char* recommended_fw_url = "https://downloadcenter.intel.com/download/27522/Latest-Firmware-for-Intel-RealSense-D400-Product-Family?v=t";
 
 using namespace rs400;
 using namespace nlohmann;
@@ -54,6 +55,26 @@ ImVec4 operator+(const ImVec4& c, float v)
     );
 }
 
+void open_url(const char* url)
+{
+#if (defined(_WIN32) || defined(_WIN64))
+    if (reinterpret_cast<int>(ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOW)) < 32)
+        throw std::runtime_error("Failed opening URL");
+#elif defined __linux__ || defined(__linux__)
+    std::string command_name = "xdg-open ";
+    std::string command = command_name + url;
+    if (system(command.c_str()))
+        throw std::runtime_error("Failed opening URL");
+#elif __APPLE__
+    std::string command_name = "open ";
+    std::string command = command_name + url;
+    if (system(command.c_str()))
+        throw std::runtime_error("Failed opening URL");
+#else
+#pragma message ( "\nLibrealsense couldn't establish OS/Build environment. \
+Some auxillary functionalities might be affected. Please report this message if encountered")
+#endif
+}
 
 namespace rs2
 {
@@ -197,9 +218,9 @@ namespace rs2
             texture_data[idx], texture_data[idx + 1], texture_data[idx + 2]);
     }
 
-    void export_to_ply(const std::string& fname, notifications_model& ns, frameset frames, video_frame texture)
+    void export_to_ply(const std::string& fname, notifications_model& ns, frameset frames, video_frame texture, bool notify)
     {
-        std::thread([&ns, frames, texture, fname]() mutable {
+        std::thread([&ns, frames, texture, fname, notify]() mutable {
 
             points p;
 
@@ -214,7 +235,7 @@ namespace rs2
             if (p)
             {
                 p.export_to_ply(fname, texture);
-                ns.add_notification({ to_string() << "Finished saving 3D view " << (texture ? "to " : "without texture to ") << fname,
+                if (notify) ns.add_notification({ to_string() << "Finished saving 3D view " << (texture ? "to " : "without texture to ") << fname,
                     std::chrono::duration_cast<std::chrono::duration<double,std::micro>>(std::chrono::high_resolution_clock::now().time_since_epoch()).count(),
                     RS2_LOG_SEVERITY_INFO,
                     RS2_NOTIFICATION_CATEGORY_UNKNOWN_ERROR });
@@ -347,6 +368,11 @@ namespace rs2
         auto res = false;
         if (supported)
         {
+            // The option's rendering model supports an alternative option title derived from its description rather than name.
+            // This is applied to the Holes Filling as its display must conform with the names used by a 3rd-party tools for consistency.
+            if (opt == RS2_OPTION_HOLES_FILL)
+                use_option_name = false;
+
             auto desc = endpoint->get_option_description(opt);
 
             // remain option to append to the current line
@@ -365,6 +391,7 @@ namespace rs2
                         model.add_log(to_string() << "Setting " << opt << " to "
                             << value << " (" << (bool_value? "ON" : "OFF") << ")");
                         endpoint->set_option(opt, value);
+                        *invalidate_flag = true;
                     }
                     catch (const error& e)
                     {
@@ -384,12 +411,61 @@ namespace rs2
                     ImGui::Text("%s", txt.c_str());
 
                     ImGui::SameLine();
-                    ImGui::PushStyleColor(ImGuiCol_Text, { 0.5f, 0.5f, 0.5f, 1.f });
-                    ImGui::Text("(?)");
-                    ImGui::PopStyleColor();
+                    ImGui::SetCursorPosX(read_only ? 268.f : 245.f);
+                    ImGui::PushStyleColor(ImGuiCol_Text, grey);
+                    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, grey);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, { 1.f,1.f,1.f,0.f });
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 1.f,1.f,1.f,0.f });
+                    ImGui::PushStyleColor(ImGuiCol_Button, { 1.f,1.f,1.f,0.f });
+                    ImGui::Button(textual_icons::question_mark, { 20, 20 });
+                    ImGui::PopStyleColor(5);
                     if (ImGui::IsItemHovered() && desc)
                     {
                         ImGui::SetTooltip("%s", desc);
+                    }
+
+                    if (!read_only)
+                    {
+                        ImGui::SameLine();
+                        ImGui::SetCursorPosX(268);
+                        if (!edit_mode)
+                        {
+                            std::string edit_id = to_string() << textual_icons::edit << "##" << id;
+                            ImGui::PushStyleColor(ImGuiCol_Text, light_grey);
+                            ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, light_grey);
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 1.f,1.f,1.f,0.f });
+                            ImGui::PushStyleColor(ImGuiCol_Button, { 1.f,1.f,1.f,0.f });
+                            if (ImGui::Button(edit_id.c_str(), { 20, 20 }))
+                            {
+                                if (is_all_integers())
+                                    edit_value = to_string() << (int)value;
+                                else
+                                    edit_value = to_string() << value;
+                                edit_mode = true;
+                            }
+                            if (ImGui::IsItemHovered())
+                            {
+                                ImGui::SetTooltip("Enter text-edit mode");
+                            }
+                            ImGui::PopStyleColor(4);
+                        }
+                        else
+                        {
+                            std::string edit_id = to_string() << textual_icons::edit << "##" << id;
+                            ImGui::PushStyleColor(ImGuiCol_Text, light_blue);
+                            ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, light_blue);
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 1.f,1.f,1.f,0.f });
+                            ImGui::PushStyleColor(ImGuiCol_Button, { 1.f,1.f,1.f,0.f });
+                            if (ImGui::Button(edit_id.c_str(), { 20, 20 }))
+                            {
+                                edit_mode = false;
+                            }
+                            if (ImGui::IsItemHovered())
+                            {
+                                ImGui::SetTooltip("Exit text-edit mode");
+                            }
+                            ImGui::PopStyleColor(4);
+                        }
                     }
 
                     ImGui::PushItemWidth(-1);
@@ -414,9 +490,46 @@ namespace rs2
                                 ImGui::PopStyleColor(2);
                             }
                         }
+                        else if (edit_mode)
+                        {
+                            char buff[TEXT_BUFF_SIZE];
+                            memset(buff, 0, TEXT_BUFF_SIZE);
+                            strcpy(buff, edit_value.c_str());
+                            if (ImGui::InputText(id.c_str(), buff, TEXT_BUFF_SIZE,
+                                ImGuiInputTextFlags_EnterReturnsTrue))
+                            {
+                                float new_value;
+                                if (!string_to_int(buff, new_value))
+                                {
+                                    error_message = "Invalid numeric input!";
+                                }
+                                else if (new_value < range.min || new_value > range.max)
+                                {
+                                    error_message = to_string() << new_value
+                                        << " is out of bounds [" << range.min << ", "
+                                        << range.max << "]";
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        endpoint->set_option(opt, new_value);
+                                        value = new_value;
+                                    }
+                                    catch (const error& e)
+                                    {
+                                        error_message = error_to_string(e);
+                                    }
+                                }
+
+                                edit_mode = false;
+                            }
+                            edit_value = buff;
+                        }
                         else if (is_all_integers())
                         {
                             auto int_value = static_cast<int>(value);
+
                             if (ImGui::SliderIntWithSteps(id.c_str(), &int_value,
                                 static_cast<int>(range.min),
                                 static_cast<int>(range.max),
@@ -426,16 +539,28 @@ namespace rs2
                                 value = static_cast<float>(int_value);
                                 model.add_log(to_string() << "Setting " << opt << " to " << value);
                                 endpoint->set_option(opt, value);
+                                *invalidate_flag = true;
                                 res = true;
                             }
                         }
                         else
                         {
+                            auto step = fmod(range.step, 1);
+                            int pow_val = 10;
+                            while ((step *= 10.f) < 0.f)
+                            {
+                                pow_val *= 10;
+                            }
+
                             if (ImGui::SliderFloat(id.c_str(), &value,
                                 range.min, range.max, "%.4f"))
                             {
+                                value = (value < range.min) ? range.min : value;
+                                value = (value > range.max) ? range.max : value;
+                                value = (int)(value * pow_val) / (float)(pow_val);
                                 model.add_log(to_string() << "Setting " << opt << " to " << value);
                                 endpoint->set_option(opt, value);
+                                *invalidate_flag = true;
                                 res = true;
                             }
                         }
@@ -482,6 +607,7 @@ namespace rs2
                             model.add_log(to_string() << "Setting " << opt << " to "
                                 << value << " (" << labels[selected] << ")");
                             endpoint->set_option(opt, value);
+                            *invalidate_flag = true;
                             res = true;
                         }
                     }
@@ -616,6 +742,7 @@ namespace rs2
         const std::string& opt_base_label,
         subdevice_model* model,
         std::shared_ptr<options> options,
+        bool* options_invalidated,
         std::string& error_message)
     {
         for (auto i = 0; i < RS2_OPTION_COUNT; i++)
@@ -629,6 +756,7 @@ namespace rs2
             metadata.opt = opt;
             metadata.endpoint = options;
             metadata.label = rs2_option_to_string(opt) + std::string("##") + ss.str();
+            metadata.invalidate_flag = options_invalidated;
             metadata.dev = model;
 
             metadata.supported = options->supports(opt);
@@ -666,7 +794,7 @@ namespace rs2
             << "/" << ((owner) ? (*owner->s).get_info(RS2_CAMERA_INFO_NAME) : "_");
 
         subdevice_model::populate_options(options_metadata,
-            ss.str().c_str(), owner, block, error_message);
+            ss.str().c_str(),owner , block, &owner->options_invalidated, error_message);
     }
 
     subdevice_model::subdevice_model(
@@ -678,6 +806,7 @@ namespace rs2
         decimation_filter(),
         spatial_filter(),
         temporal_filter(),
+        hole_filling_filter(),
         depth_to_disparity(),
         disparity_to_depth()
     {
@@ -745,6 +874,13 @@ namespace rs2
             temporal_filter->enabled = true;
             post_processing.push_back(temporal_filter);
 
+            auto hole_filling = std::make_shared<rs2::hole_filling_filter>();
+            hole_filling_filter = std::make_shared<processing_block_model>(
+                this, "Hole Filling Filter", hole_filling,
+                [=](rs2::frame f) { return hole_filling->process(f); }, error_message);
+            hole_filling_filter->enabled = false;
+            post_processing.push_back(hole_filling_filter);
+
             auto disparity_2_depth = std::make_shared<rs2::disparity_transform>(false);
             disparity_to_depth = std::make_shared<processing_block_model>(
                 this, "Disparity->Depth", disparity_2_depth,
@@ -761,7 +897,7 @@ namespace rs2
         std::stringstream ss;
         ss << "##" << dev.get_info(RS2_CAMERA_INFO_NAME)
             << "/" << s->get_info(RS2_CAMERA_INFO_NAME);
-        populate_options(options_metadata, ss.str().c_str(), this, s, error_message);
+        populate_options(options_metadata, ss.str().c_str(), this, s, &options_invalidated, error_message);
 
         try
         {
@@ -815,14 +951,23 @@ namespace rs2
 
             show_single_fps_list = is_there_common_fps();
 
-            // set default selections
-            int selection_index;
+            // set default selections. USB2 configuration requires low-res resolution/fps.
+            int selection_index{};
+            bool usb2 = false;
+            if (dev.supports(RS2_CAMERA_INFO_USB_TYPE_DESCRIPTOR))
+            {
+                std::string dev_usb_type(dev.get_info(RS2_CAMERA_INFO_USB_TYPE_DESCRIPTOR));
+                usb2 = (std::string::npos != dev_usb_type.find("2."));
+            }
+
+            int fps_constrain = usb2 ? 15 : 30;
+            auto resolution_constrain = usb2 ? std::make_pair(640, 480) :std::make_pair(1280, 720);
 
             if (!show_single_fps_list)
             {
                 for (auto fps_array : fps_values_per_stream)
                 {
-                    if (get_default_selection_index(fps_array.second, 30, &selection_index))
+                    if (get_default_selection_index(fps_array.second, fps_constrain, &selection_index))
                     {
                         ui.selected_fps_id[fps_array.first] = selection_index;
                         break;
@@ -831,7 +976,7 @@ namespace rs2
             }
             else
             {
-                if (get_default_selection_index(shared_fps_values, 30, &selection_index))
+                if (get_default_selection_index(shared_fps_values, fps_constrain, &selection_index))
                     ui.selected_shared_fps_id = selection_index;
             }
 
@@ -844,9 +989,7 @@ namespace rs2
                 }
             }
 
-            // Limit Realtec sensor default
-            auto constrain = std::make_pair(1280, 720);
-            get_default_selection_index(res_values, constrain, &selection_index);
+            get_default_selection_index(res_values, resolution_constrain, &selection_index);
             ui.selected_res_id = selection_index;
 
             while (ui.selected_res_id >= 0 && !is_selected_combination_supported()) ui.selected_res_id--;
@@ -911,7 +1054,7 @@ namespace rs2
         //ImGui::Columns(2, label.c_str(), false);
         //ImGui::SetColumnOffset(1, 135);
         auto col0 = ImGui::GetCursorPosX();
-        auto col1 = 145.f;
+        auto col1 = 155.f;
 
         // Draw combo-box with all resolution options for this device
         auto res_chars = get_string_pointers(resolutions);
@@ -1077,13 +1220,6 @@ namespace rs2
                 {
                     //ImGui::NextColumn();
                 }
-
-                //if (streaming && rgb_rotation_btn && ImGui::Button("Flip Stream Orientation", ImVec2(160, 20)))
-                //{
-                //    rotate_rgb_image(dev, res_values[selected_res_id].first);
-                //    if (ImGui::IsItemHovered())
-                //        ImGui::SetTooltip("Rotate Sensor 180 deg");
-                //}
             }
         }
 
@@ -1136,7 +1272,9 @@ namespace rs2
             }
         }
 
-        return results.size() > 0;
+        // Verify that the number of found matches corrseponds to the number of the requested streams
+        // TODO - review whether the comparison can be made strict (==)
+        return results.size() >= size_t(std::count_if(stream_enabled.begin(), stream_enabled.end(), [](const std::pair<int, bool>& kpv)-> bool { return kpv.second == true; }));
     }
 
     std::vector<stream_profile> subdevice_model::get_selected_profiles()
@@ -1483,6 +1621,7 @@ namespace rs2
     {
         dev = d;
         original_profile = p;
+
         profile = p;
         texture->colorize = d->depth_colorizer;
 
@@ -1491,7 +1630,11 @@ namespace rs2
             size = {
                 static_cast<float>(vd.width()),
                 static_cast<float>(vd.height()) };
-        };
+
+            original_size = {
+                static_cast<float>(vd.width()),
+                static_cast<float>(vd.height()) };
+        }
         _stream_not_alive.reset();
 
     }
@@ -1531,7 +1674,7 @@ namespace rs2
                 {
                     // Convert from local (pixel) coordinate system to device coordinate system
                     auto r = roi_display_rect;
-                    r = r.normalize(stream_rect).unnormalize(_normalized_zoom.unnormalize(get_stream_bounds()));
+                    r = r.normalize(stream_rect).unnormalize(_normalized_zoom.unnormalize(get_original_stream_bounds()));
                     dev->roi_rect = r; // Store new rect in device coordinates into the subdevice object
 
                     // Send it to firmware:
@@ -1592,7 +1735,7 @@ namespace rs2
             if (!capturing_roi)
             {
                 auto r = dev->roi_rect; // Take the current from device, convert to local coordinates
-                r = r.normalize(_normalized_zoom.unnormalize(get_stream_bounds())).unnormalize(stream_rect).cut_by(stream_rect);
+                r = r.normalize(_normalized_zoom.unnormalize(get_original_stream_bounds())).unnormalize(stream_rect).cut_by(stream_rect);
                 roi_display_rect = r;
             }
 
@@ -1777,7 +1920,7 @@ namespace rs2
             ImGui::PushItemWidth(200);
             draw_combo_box("##Tex Source", tex_sources_str, selected_tex_source);
             selected_tex_source_uid = tex_sources[selected_tex_source];
-            texture.colorize = streams[selected_tex_source].texture->colorize;
+            texture.colorize = streams[tex_sources[selected_tex_source]].texture->colorize;
             ImGui::PopItemWidth();
 
             // Occlusion control for RGB UV-Map uses option's description as label
@@ -2867,6 +3010,7 @@ namespace rs2
                         auto depth_2_disparity = s.second.dev->depth_to_disparity;
                         auto spatial_filter = s.second.dev->spatial_filter;
                         auto temp_filter = s.second.dev->temporal_filter;
+                        auto hole_filling = s.second.dev->hole_filling_filter;
                         auto disparity_2_depth = s.second.dev->disparity_to_depth;
 
                         if (dec_filter->enabled)
@@ -2883,6 +3027,9 @@ namespace rs2
 
                         if (disparity_2_depth->enabled)
                             f = disparity_2_depth->invoke(f);
+
+                        if (hole_filling->enabled)
+                            f = hole_filling->invoke(f);
 
                         return f;
                     }
@@ -3193,7 +3340,7 @@ namespace rs2
 
         popup_if_error(window.get_font(), error_message);
 
-        return depth;
+        return f;
     }
 
     void viewer_model::reset_camera(float3 p)
@@ -4363,7 +4510,8 @@ namespace rs2
         }
         return keep_showing;
     }
-    bool device_model::draw_advanced_controls(viewer_model& view, ux_window& window)
+
+    bool device_model::draw_advanced_controls(viewer_model& view, ux_window& window, std::string& error_message)
     {
         bool was_set = false;
 
@@ -4377,7 +4525,7 @@ namespace rs2
                 auto advanced = dev.as<advanced_mode>();
                 if (advanced.is_enabled())
                 {
-                    draw_advanced_mode_controls(advanced, amc, get_curr_advanced_controls, was_set);
+                    draw_advanced_mode_controls(advanced, amc, get_curr_advanced_controls, was_set, error_message);
                 }
                 else
                 {
@@ -4850,7 +4998,9 @@ namespace rs2
         ux_window& window,
         std::string& error_message,
         viewer_model& viewer,
-        bool update_read_only_options)
+        bool update_read_only_options,
+        bool load_json_if_streaming,
+        json_loading_func json_loading)
     {
         const float panel_height = 40.f;
         auto panel_pos = ImGui::GetCursorPos();
@@ -5053,26 +5203,32 @@ namespace rs2
         std::string upload_button_name = to_string() << textual_icons::upload << "##" << id;
         ImGui::PushStyleColor(ImGuiCol_Text, light_grey);
         ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, light_grey);
-        if (ImGui::ButtonEx(upload_button_name.c_str(), icons_size, is_streaming ? ImGuiButtonFlags_Disabled : buttons_flags))
+
+        if (ImGui::ButtonEx(upload_button_name.c_str(), icons_size, (is_streaming && !load_json_if_streaming) ? ImGuiButtonFlags_Disabled : buttons_flags))
         {
             if (is_advanced_mode_enabled)
             {
-                auto ret = file_dialog_open(open_file, "JavaScript Object Notation (JSON)\0*.json\0", NULL, NULL);
-                if (ret)
+                json_loading([&]()
                 {
-                    error_message = safe_call([&]() { load_json(ret); });
-                }
+                    auto ret = file_dialog_open(open_file, "JavaScript Object Notation (JSON)\0*.json\0", NULL, NULL);
+                    if (ret)
+                    {
+                        error_message = safe_call([&]() { load_json(ret); });
+                    }
+                });
             }
             else
             {
                 require_advanced_mode_enable_prompt = true;
             }
         }
+
         if (ImGui::IsItemHovered())
         {
-            std::string tooltip = to_string() << "Load pre-configured settings" << (is_streaming ? " (Disabled while streaming)" : "");
+            std::string tooltip = to_string() << "Load pre-configured settings" << (is_streaming && !load_json_if_streaming ? " (Disabled while streaming)" : "");
             ImGui::SetTooltip("%s", tooltip.c_str());
         }
+
         ImGui::SameLine();
 
         ////////////////////////////////////////
@@ -5115,13 +5271,17 @@ namespace rs2
         return panel_height;
     }
 
+
     void device_model::draw_controls(float panel_width, float panel_height,
         ux_window& window,
         std::string& error_message,
         device_model*& device_to_remove,
         viewer_model& viewer, float windows_width,
         bool update_read_only_options,
-        std::vector<std::function<void()>>& draw_later, bool draw_device_outline)
+        std::vector<std::function<void()>>& draw_later,
+        bool load_json_if_streaming,
+        json_loading_func json_loading,
+        bool draw_device_outline)
     {
         ////////////////////////////////////////
         // draw device header
@@ -5155,7 +5315,13 @@ namespace rs2
         ////////////////////////////////////////
         const ImVec2 name_pos = { pos.x + 9, pos.y + 17 };
         ImGui::SetCursorPos(name_pos);
-        ImGui::Text(" %s", dev.get_info(RS2_CAMERA_INFO_NAME));
+        std::stringstream ss;
+        ss << dev.get_info(RS2_CAMERA_INFO_NAME);
+        if (dev.supports(RS2_CAMERA_INFO_USB_TYPE_DESCRIPTOR))
+            ss << "   " << textual_icons::usb_type << " " << dev.get_info(RS2_CAMERA_INFO_USB_TYPE_DESCRIPTOR);
+
+        ImGui::Text(" %s", ss.str().c_str());
+        //ImGui::Text(" %s", dev.get_info(RS2_CAMERA_INFO_NAME));
         ImGui::PopFont();
 
         ////////////////////////////////////////
@@ -5202,7 +5368,7 @@ namespace rs2
                 ImGui::SetTooltip("%s", full_path.c_str());
             ImGui::PopFont();
         }
-        ImGui::SetCursorPos({ 0, pos.y + header_h});
+        ImGui::SetCursorPos({ 0, pos.y + header_h });
 
         ////////////////////////////////////////
         // draw device control panel
@@ -5228,7 +5394,7 @@ namespace rs2
             const float horizontal_space_before_device_control = 3.0f;
             auto advanced_mode_pos = ImVec2{ pos.x + horizontal_space_before_device_control, pos.y + vertical_space_before_advanced_mode_control };
             ImGui::SetCursorPos(advanced_mode_pos);
-            const float advanced_mode_panel_height = draw_preset_panel(panel_width, window, error_message, viewer, update_read_only_options);
+            const float advanced_mode_panel_height = draw_preset_panel(panel_width, window, error_message, viewer, update_read_only_options, load_json_if_streaming, json_loading);
             ImGui::SetCursorPos({ advanced_mode_pos.x, advanced_mode_pos.y + advanced_mode_panel_height });
         }
 
@@ -5259,26 +5425,34 @@ namespace rs2
             ImGui::PushFont(window.get_font());
             int line_h = 22;
             info_control_panel_height = (int)infos.size() * line_h + 5;
-
             for (auto&& pair : infos)
             {
                 auto rc = ImGui::GetCursorPos();
                 ImGui::SetCursorPos({ rc.x + 12, rc.y + 4 });
-                ImGui::Text("%s:", pair.first.c_str()); ImGui::SameLine();
-
+                std::string info_category;
+                if (pair.first == "Recommended Firmware Version")
+                {
+                    info_category = "Latest FW Version";
+                }
+                else
+                {
+                    info_category = pair.first.c_str();
+                }
+                ImGui::Text("%s:", info_category.c_str());
+                ImGui::SameLine();
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, sensor_bg);
                 ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, light_blue);
                 ImGui::PushStyleColor(ImGuiCol_Text, light_grey);
-                ImGui::SetCursorPos({ rc.x + 130, rc.y + 1 });
+                ImGui::SetCursorPos({ rc.x + 145, rc.y + 1 });
                 std::string label = to_string() << "##" << id << " " << pair.first;
                 ImGui::InputText(label.c_str(),
                     (char*)pair.second.data(),
                     pair.second.size() + 1,
                     ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_ReadOnly);
                 ImGui::PopStyleColor(3);
-
                 ImGui::SetCursorPos({ rc.x, rc.y + line_h });
             }
+
             ImGui::PopFont();
         }
 
@@ -5317,7 +5491,7 @@ namespace rs2
 
                     if (!sub->streaming)
                     {
-                        std::string label = to_string() << "  " << textual_icons::toggle_off <<"\noff   ##" << id << "," << sub->s->get_info(RS2_CAMERA_INFO_NAME);
+                        std::string label = to_string() << "  " << textual_icons::toggle_off << "\noff   ##" << id << "," << sub->s->get_info(RS2_CAMERA_INFO_NAME);
 
                         ImGui_ScopePushStyleColor(ImGuiCol_Text, redish);
                         ImGui_ScopePushStyleColor(ImGuiCol_TextSelectedBg, redish + 0.1f);
@@ -5474,7 +5648,7 @@ namespace rs2
                 }
                 if (dev.is<advanced_mode>() && sub->s->is<depth_sensor>())
                 {
-                    if (draw_advanced_controls(viewer, window))
+                    if (draw_advanced_controls(viewer, window, error_message))
                     {
                         sub->options_invalidated = true;
                         selected_file_preset.clear();
@@ -5868,6 +6042,7 @@ namespace rs2
         timestamp = n.get_timestamp();
         severity = n.get_severity();
         created_time = std::chrono::high_resolution_clock::now();
+        category = n._category;
     }
 
     double notification_model::get_age_in_ms() const
@@ -5879,21 +6054,40 @@ namespace rs2
     {
         ImGui::PopStyleColor(3);
     }
+
     void notification_model::set_color_scheme(float t) const
     {
-        if (severity == RS2_LOG_SEVERITY_ERROR ||
-            severity == RS2_LOG_SEVERITY_WARN)
+        if (category == RS2_NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED)
         {
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, { 0.3f, 0.f, 0.f, 1 - t });
-            ImGui::PushStyleColor(ImGuiCol_TitleBg, { 0.5f, 0.2f, 0.2f, 1 - t });
-            ImGui::PushStyleColor(ImGuiCol_TitleBgActive, { 0.6f, 0.2f, 0.2f, 1 - t });
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, { 33/255.f, 40/255.f, 46/255.f, 1 - t });
+            ImGui::PushStyleColor(ImGuiCol_TitleBg, { 62 / 255.f, 77 / 255.f, 89 / 255.f, 1 - t });
+            ImGui::PushStyleColor(ImGuiCol_TitleBgActive, { 62 / 255.f, 77 / 255.f, 89 / 255.f, 1 - t });
         }
         else
         {
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, { 0.3f, 0.3f, 0.3f, 1 - t });
-            ImGui::PushStyleColor(ImGuiCol_TitleBg, { 0.4f, 0.4f, 0.4f, 1 - t });
-            ImGui::PushStyleColor(ImGuiCol_TitleBgActive, { 0.6f, 0.6f, 0.6f, 1 - t });
+            if (severity == RS2_LOG_SEVERITY_ERROR ||
+                severity == RS2_LOG_SEVERITY_WARN)
+            {
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, { 0.3f, 0.f, 0.f, 1 - t });
+                ImGui::PushStyleColor(ImGuiCol_TitleBg, { 0.5f, 0.2f, 0.2f, 1 - t });
+                ImGui::PushStyleColor(ImGuiCol_TitleBgActive, { 0.6f, 0.2f, 0.2f, 1 - t });
+            }
+            else
+            {
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, { 0.3f, 0.3f, 0.3f, 1 - t });
+                ImGui::PushStyleColor(ImGuiCol_TitleBg, { 0.4f, 0.4f, 0.4f, 1 - t });
+                ImGui::PushStyleColor(ImGuiCol_TitleBgActive, { 0.6f, 0.6f, 0.6f, 1 - t });
+            }
         }
+    }
+
+    const int notification_model::get_max_lifetime_ms() const
+    {
+        if (category == RS2_NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED)
+        {
+            return 30000;
+        }
+        return 10000;
     }
 
     void notification_model::draw(int w, int y, notification_model& selected)
@@ -5904,7 +6098,7 @@ namespace rs2
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 1);
 
-        auto ms = get_age_in_ms() / MAX_LIFETIME_MS;
+        auto ms = get_age_in_ms() / get_max_lifetime_ms();
         auto t = smoothstep(static_cast<float>(ms), 0.7f, 1.0f);
 
         set_color_scheme(t);
@@ -5914,23 +6108,80 @@ namespace rs2
         ImGui::SetNextWindowPos({ float(w - 330), float(y) });
         height = lines * 30 + 20;
         ImGui::SetNextWindowSize({ float(315), float(height) });
-        std::string label = to_string() << "Hardware Notification #" << index;
-        ImGui::Begin(label.c_str(), nullptr, flags);
 
-        ImGui::Text("%s", message.c_str());
+        bool opened = true;
+        bool* opened_ptr;
+        std::string label;
+        if (category == RS2_NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED)
+        {
+            label = "Firmware update recommended";
+            opened_ptr = &opened;
+        }
+        else
+        {
+            label = to_string() << "Hardware Notification #" << index;
+            opened_ptr = nullptr;
+        }
+
+        ImGui::PushStyleColor(ImGuiCol_CloseButton, { 62 / 255.f, 77 / 255.f, 89 / 255.f, 1 - t });
+        ImGui::PushStyleColor(ImGuiCol_CloseButtonHovered, { 62 / 255.f + 0.1f, 77 / 255.f + 0.1f, 89 / 255.f + 0.1f, 1 - t });
+        ImGui::PushStyleColor(ImGuiCol_CloseButtonActive, { 62 / 255.f, 77 / 255.f, 89 / 255.f, 1 - t });
+        ImGui::Begin(label.c_str(), opened_ptr, flags);
+        
+        if (category == RS2_NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED)
+        {
+            if (!opened)
+                to_close = true;
+
+            std::regex version_regex("([0-9]+.[0-9]+.[0-9]+.[0-9]+\n)");
+            std::smatch sm;
+            std::regex_search(message, sm, version_regex);
+            std::string message_prefix = sm.prefix();
+            std::string curr_version = sm.str();
+            std::string message_suffix = sm.suffix();
+            ImGui::Text("%s", message_prefix.c_str());
+            ImGui::SameLine(0, 0);
+            ImGui::PushStyleColor(ImGuiCol_Text, { (float)255 / 255, (float)46 / 255, (float)54 / 255, 1 - t });
+            ImGui::Text("%s", curr_version.c_str());
+            ImGui::PopStyleColor();
+            ImGui::Text("%s", message_suffix.c_str());
+
+            ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, { 1, 1, 1, 1 - t });
+            ImGui::PushStyleColor(ImGuiCol_Button, { 62 / 255.f, 77 / 255.f, 89 / 255.f, 1 - t });
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 62 / 255.f + 0.1f, 77 / 255.f + 0.1f, 89 / 255.f + 0.1f, 1 - t });
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, { 62 / 255.f - 0.1f, 77 / 255.f - 0.1f, 89 / 255.f - 0.1f, 1 - t });
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2);
+
+            ImGui::Indent(80);
+            if (ImGui::Button("Download update", { 130, 30 }))
+            {
+                open_url(recommended_fw_url);
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", "Internet connection required");
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor(4);
+        }
+        else
+        {
+            ImGui::Text("%s", message.c_str());
+        }
 
         if (lines == 1)
             ImGui::SameLine();
 
-        ImGui::Text("(...)");
-
-        if (ImGui::IsMouseClicked(0) && ImGui::IsItemHovered())
+        if (category != RS2_NOTIFICATION_CATEGORY_FIRMWARE_UPDATE_RECOMMENDED)
         {
-            selected = *this;
+            ImGui::Text("(...)");
+
+            if (ImGui::IsMouseClicked(0) && ImGui::IsItemHovered())
+            {
+                selected = *this;
+            }
         }
 
         ImGui::End();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor(4);
         clear_color_scheme();
         ImGui::PopStyleVar();
     }
@@ -5964,7 +6215,7 @@ namespace rs2
                 std::end(pending_notifications),
                 [&](notification_model& n)
             {
-                return (n.get_age_in_ms() > notification_model::MAX_LIFETIME_MS);
+                return (n.get_age_in_ms() > n.get_max_lifetime_ms() || n.to_close);
             }), end(pending_notifications));
 
             int idx = 0;

@@ -413,6 +413,11 @@ describe('Sensor tests', function() {
         assert.equal(typeof p.width, 'number');
         assert.equal(typeof p.height, 'number');
         const intrin = p.getIntrinsics();
+        // some stream profiles have no intrinsics, and undefined is returned
+        // so bypass these cases
+        if (!intrin) {
+          return;
+        }
         assert.equal('width' in intrin, true);
         assert.equal('height' in intrin, true);
         assert.equal('ppx' in intrin, true);
@@ -442,11 +447,19 @@ describe('Sensor tests', function() {
     return new Promise((resolve, reject) => {
       const profiles0 = sensors[0].getStreamProfiles();
       sensors[0].open(profiles0[0]);
+      let started = true;
       sensors[0].start((frame) => {
         assert.equal(frame instanceof rs2.Frame, true);
-        sensors[0].stop();
-        sensors[0].close();
-        resolve();
+        // Add a timeout to stop to avoid failure during playback test
+        // and make sure to stop+close sensors[0] once
+        if (started) {
+          started = false;
+          setTimeout(() => {
+            sensors[0].stop();
+            sensors[0].close();
+            resolve();
+          }, 0);
+        }
       });
     });
   });
@@ -503,13 +516,17 @@ describe('Sensor tests', function() {
         assert.equal(typeof n.timestamp, 'number');
         assert.equal(typeof n.severity, 'number');
         assert.equal(typeof n.category, 'number');
+        assert.equal(typeof n.serializedData, 'string');
         resolve();
       });
-      setTimeout(() => {
-        dev.cxxDev.triggerErrorForTest();
-      }, 100);
+      // No need to manually trigger error during playback.
+      if (!isPlayback) {
+        setTimeout(() => {
+          dev.cxxDev.triggerErrorForTest();
+        }, 100);
+      }
     });
-  });
+  }).timeout(5000);
 });
 
 describe('Align tests', function() {
@@ -689,6 +706,7 @@ if (!(isRecord || isPlayback)) {
           let sensors = recorder.querySensors();
           let sensor = sensors[0];
           let profiles = sensor.getStreamProfiles();
+          assert.equal(recorder.fileName, file);
           for (let i = 0; i < profiles.length; i++) {
             if (profiles[i].streamType === rs2.stream.STREAM_DEPTH &&
                 profiles[i].fps === 30 &&

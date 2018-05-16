@@ -3,8 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace Intel.RealSense
 {
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void frame_callback(IntPtr frame, IntPtr user_data);
     //public delegate void frame_callback([Out, MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(FrameMarshaler))] out Frame frame, IntPtr user_data);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void frame_processor_callback(IntPtr frame, IntPtr user, IntPtr user_data);
 
     public enum NotificationCategory
     {
@@ -88,6 +92,8 @@ namespace Intel.RealSense
         Gyro = 5,
         Accel = 6,
         Gpio = 7,
+        Pose = 8,
+        Confidence = 9,
     }
 
     public enum Format
@@ -176,6 +182,7 @@ namespace Intel.RealSense
         FilterSmoothDelta = 38,
         HolesFill = 39,
         StereoBaseline = 40,
+        AutoExposureConvergeStep = 41,
     }
 
     public enum Sr300VisualPreset

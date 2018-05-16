@@ -17,28 +17,37 @@ namespace Intel.RealSense
             m_instance = new HandleRef(this, NativeMethods.rs2_create_frame_queue(capacity, out error));
         }
 
-        public bool PollForFrame(out Frame frame)
+        public bool PollForFrame(out Frame frame, FramesReleaser releaser = null)
         {
             object error;
-            return NativeMethods.rs2_poll_for_frame(m_instance.Handle, out frame, out error) > 0;
+            if (NativeMethods.rs2_poll_for_frame(m_instance.Handle, out frame, out error) > 0)
+            {
+                frame = FramesReleaser.ScopedReturn(releaser, FrameSet.CreateFrame(frame.m_instance.Handle));
+                return true;
+            }
+            return false;
         }
 
-        public Frame WaitForFrame()
-        {
-            object error;
-            var ptr = NativeMethods.rs2_wait_for_frame(m_instance.Handle, 5000, out error);
-            var frame = FrameSet.CreateFrame(ptr);
-            return frame;
-        }
-
-        public FrameSet WaitForFrames()
+        public Frame WaitForFrame(FramesReleaser releaser = null)
         {
             object error;
             var ptr = NativeMethods.rs2_wait_for_frame(m_instance.Handle, 5000, out error);
-            var frame = new FrameSet(ptr);
-            return frame;
+            return FramesReleaser.ScopedReturn(releaser, FrameSet.CreateFrame(ptr));
         }
 
+        public FrameSet WaitForFrames(FramesReleaser releaser = null)
+        {
+            object error;
+            var ptr = NativeMethods.rs2_wait_for_frame(m_instance.Handle, 5000, out error);
+            return FramesReleaser.ScopedReturn(releaser, new FrameSet(ptr));
+        }
+
+        public void Enqueue(Frame f)
+        {
+            object error;
+            NativeMethods.rs2_frame_add_ref(f.m_instance.Handle, out error);
+            NativeMethods.rs2_enqueue_frame(f.m_instance.Handle, m_instance.Handle);
+        }
         #region IDisposable Support
         private bool disposedValue = false; // To detect redundant calls
 

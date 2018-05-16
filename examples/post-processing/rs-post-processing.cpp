@@ -69,7 +69,7 @@ int main(int argc, char * argv[]) try
     // Start streaming with the above configuration
     pipe.start(cfg);
 
-    // Decalre filters
+    // Declare filters
     rs2::decimation_filter dec_filter;  // Decimation - reduces depth frame density
     rs2::spatial_filter spat_filter;    // Spatial    - edge-preserving spatial smoothing
     rs2::temporal_filter temp_filter;   // Temporal   - reduces temporal noise
@@ -82,7 +82,7 @@ int main(int argc, char * argv[]) try
     // Initialize a vector that holds filters and their options
     std::vector<filter_options> filters;
 
-    // The following order of emplacment will dictate the orders in which filters are applied
+    // The following order of emplacement will dictate the orders in which filters are applied
     filters.emplace_back("Decimate", dec_filter);
     filters.emplace_back(disparity_filter_name, depth_to_disparity);
     filters.emplace_back("Spatial", spat_filter);
@@ -105,7 +105,7 @@ int main(int argc, char * argv[]) try
         {
             rs2::frameset data = pipe.wait_for_frames(); // Wait for next set of frames from the camera
             rs2::frame depth_frame = data.get_depth_frame(); //Take the depth frame from the frameset
-            if (!depth_frame) // Should not happen but if the pipeline is configured differently 
+            if (!depth_frame) // Should not happen but if the pipeline is configured differently
                 return;       //  it might not provide depth and we don't want to crash
 
             rs2::frame filtered = depth_frame; // Does not copy the frame, only adds a reference
@@ -140,7 +140,7 @@ int main(int argc, char * argv[]) try
             // Note, pushing to two different queues might cause the application to display
             //  original and filtered pointclouds from different depth frames
             //  To make sure they are synchronized you need to push them together or add some
-            //  synchronization mechanisms 
+            //  synchronization mechanisms
             filtered_data.enqueue(filtered);
             original_data.enqueue(depth_frame);
         }
@@ -162,7 +162,7 @@ int main(int argc, char * argv[]) try
     // We'll use rotation_velocity to rotate the pointcloud for a better view of the filters effects
     float rotation_velocity = 0.3f;
 
-    while (app) 
+    while (app)
     {
         float w = static_cast<float>(app.width());
         float h = static_cast<float>(app.height());
